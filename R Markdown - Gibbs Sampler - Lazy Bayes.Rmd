@@ -1,0 +1,127 @@
+---
+title: "Lazy Bayesian Approach to Normal Model Using Gibbs Sampling"
+author: "Matthew Scott | mscott24@bu.edu"
+date: "January 2023"
+output:
+  pdf_document: default
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(ggplot2)
+```
+<br>
+**Question**  
+Let $X_{1}, ..., X_{n} \stackrel{iid}{\sim} \mathcal{N}(\mu,\tau^{2}), \tau$ being the precision of the normal distribution. Suppose we wish to derive the Bayes estimators of $\mu$ and $\tau$ w.r.t. independent $\mathcal{N}(\mu_{0}, t^{2})$ ($t$ is the precision) and Gamma($\alpha$, $\beta$) priors for ($\mu, \tau$). Identify the conditional posterior distributions $p(\mu|\tau, X)$ and $p(\tau|\mu, X)$. Consider the data on systolic BP levels from 20 individuals: 98, 160, 138, 128, 130, 114, 123, 134, 128, 107, 123, 125, 129, 132, 154, 115, 126, 132, 136, 130. Implement a Gibbs sampling procedure for the data set. You may not use WINBUGS. Specify (and justify) your selections of prior distributions. Plot the marginal posterior distributions of $\mu$ and $\tau$, and provide the summary statistics in each case.
+
+<br>
+**Derivation of marginal posteriors**  
+Note that the joint distribution of the data is given by  
+$$
+\begin{aligned}
+  f(x_{1}, ..., x_{n}|\mu, \tau) \propto \tau^{\frac{n}{2}}exp(\frac{t}{2}\sum_{i=1}^{n}(x_{i}-\mu)^2) \\
+\end{aligned}
+$$
+
+and the joint prior is  
+$$
+\begin{aligned}
+  \pi(\mu, \tau) = \pi(\mu)\pi(\tau) \propto \tau^{\alpha-1}exp(-\frac{t}{2}(\mu-\mu_{0})^{2}-\frac{\tau}{\beta}) \\ 
+\end{aligned}
+$$
+
+Thus the posterior is given by 
+$$
+\begin{aligned}
+  g(\mu, \tau|x_{1}, ..., x_{n}) \propto \tau^{\alpha+n/2-1}exp(\frac{t}{2}\sum_{i=1}^{n}(x_{i}-\mu)^2-\frac{t}{2}(\mu-\mu_{0})^{2}-\frac{\tau}{\beta})) \\
+\end{aligned}
+$$
+
+Note that the full conditionals are given by  
+$$
+\begin{aligned}
+  g(\mu|\tau,x_{1}, ..., x_{n}) &\propto exp(\frac{t}{2}\sum_{i=1}^{n}(x_{i}-\mu)^2-\frac{t}{2}(\mu-\mu_{0})^{2})) \\
+  &\propto exp[\frac{1}{2}(n\tau(\mu-\bar{x})^{2}+\frac{t}{2}(\mu-\mu_{0})^{2})] \\
+  &\propto exp(-\frac{n\tau+t}{2}(\mu-\frac{n\tau\bar{x}+t\mu_{0}}{n\tau+t})^2) \\
+  &\rightarrow \mu|\tau, x_{1}, ..., x_{n} \sim \mathcal{N}(\frac{n\tau\bar{x}+t\mu_{0}}{n\tau+t},\frac{1}{n\tau+t}) \\
+\end{aligned}  
+$$
+
+Similarly,  
+$$
+\begin{aligned}
+  g(\tau|\mu, x_{1}, ..., x_{n}) & \propto \tau^{\alpha +n/2-1}exp[-\frac{\tau}{2}\sum_{i=1}^{n} (x_{i}-\mu)^{2}-\frac{\tau}{\beta}] \\
+  &\propto \tau^{\alpha +n/2-1}exp(-\tau	(\frac{1}{2}\sum_{i=1}^{n} (x_{i}-\mu)^{2}+\frac{1}{\beta})) \\
+  &\rightarrow \tau|\mu, x_{1}, ..., x_{n} \sim Gamma(\alpha+\frac{n}{2}, (\frac{1}{2}\sum_{i=1}^{n}(x_{i}-\mu)^{2}+\frac{1}{\beta})^{-1})
+\end{aligned}
+$$
+**Choice of priors**  
+Density plots for the marginal posterior distributions of mu and tau as well as summary statistics are presented below. We chose a gamma prior for tau with parameters $\alpha$=15 and $\beta$=1. We chose this as we wanted a relatively diffuse prior. Moreover, having $\alpha$ greater than beta allowed the distribution to appear like a skewed bell curve with mean=15. I believe the variance most likely falls on the lower tail as high blood pressure may be considered an abnormal event or one that can be treated with medication. This prior allows us to capture that as more density is present on the lower tail whereas less density is present on the upper tail. For choice of $\mu_{0}$ and $\tau_{0}$, I researched recent papers reporting SBP population estimates. In a 2020 study with 1457 participants^[https://jamanetwork.com/journals/jamacardiology/fullarticle/2766469], parameters were estimated as $\mu_{SBP}$=111.3 and $\sigma^{2}_{SBP}$=10. Therefore, I used 111.3 as my prior for $\mu$ and 1/100 as my prior precision $\tau^{2}$
+``` {r include=FALSE}
+rm(list = ls())
+cat("\014")  
+library(Hmisc)
+```
+<br>
+**Gibbs sampler**
+```{r}
+#load data
+X <- c(98, 160, 138, 128, 130, 114, 123, 134, 128, 107, 
+       123, 125, 129, 132, 154, 115, 126, 132, 136,130)
+n <- length(X)
+nxbar <- sum(X)
+
+#define algorithm parameters
+burn_in <- 1000
+loops <- 10000
+intervals <- 15
+
+#define prior parameters
+beta <- 1
+alpha <- 20
+
+#initialize algorithm
+mu <- rep(NA, loops)
+tau <- rep(NA, loops)
+tau[1] <- 1
+mu0 <- 111.3
+tau0 <- 1/100
+
+#run Gibbs sampler
+for (i in 2:loops){
+  mu[i] <- rnorm(1, mean = (nxbar*tau[i-1] + mu0*tau0) / ((n*tau[i-1]) + (1*tau0)), 
+                sd = 1/sqrt(n*tau[i-1] + 1*tau0))
+
+  tau[i] <- rgamma(1, n/2 + alpha, scale=1/(sum((X - mu[i])^2)/2 + 1/beta))
+}
+
+
+#remove burn-in period and record every 15th point
+mu <- mu[-(1:burn_in)]
+tau <- tau[-(1:burn_in)] 
+musample <- mu[seq(1,length(mu),intervals)] 
+tausample <- tau[seq(1,length(tau),intervals)]
+```
+<br>
+```{r, echo=FALSE, fig.align='center'}
+par(mfrow=c(1,2))
+plot(density(musample), main="Marginal posterior of mu")
+plot(density(tausample), main='Marginal posterior of tau')
+```
+<br>
+**Summary statistics for mu**  
+```{r}
+t1 <- rbind(round(mean(musample),3), round(sd(musample),3), 
+            round(median(musample),3), round(IQR(musample),3))
+d1 <- data.frame(t(t1))
+colnames(d1) <- c("Mean", "SD", "Median", "IQR")
+d1
+```
+<br>
+**Summary statistics for tau**
+```{r}
+t2 <- rbind(round(mean(tausample),3), round(sd(tausample),3), 
+            round(median(tausample),3), round(IQR(tausample),3))
+d2 <- data.frame(t(t2))
+colnames(d2) <- c("Mean", "SD", "Median", "IQR")
+d2
+```
